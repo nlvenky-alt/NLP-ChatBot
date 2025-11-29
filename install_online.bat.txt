@@ -1,0 +1,273 @@
+@echo off
+setlocal enabledelayedexpansion
+
+echo ======================================================================
+echo INAS CHATBOT - ONLINE INSTALLER
+echo ======================================================================
+echo.
+echo This will download and install (if missing):
+echo   • Ollama (LLM server)
+echo   • Python 3.10+ (if not found on system)
+echo   • Required Python packages (from PyPI)
+echo   • AI models (llama3.2:1b, llama3.2:3b)
+echo   • Embedding models (all-MiniLM-L6-v2)
+echo.
+echo Requires: Active internet connection
+echo Estimated time: 20-30 minutes
+echo.
+pause
+
+set "BASE=%~dp0"
+set "PYTHON_DIR=%BASE%Python310"
+set "PYTHON_EXE="
+
+REM ========================================================================
+REM STEP 1: Check/Install Ollama
+REM ========================================================================
+
+echo.
+echo [1/5] Checking Ollama installation...
+echo ======================================================================
+
+where ollama >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    echo ✓ Ollama already installed
+    goto :ollama_ready
+)
+
+echo ⚠ Ollama not found. Downloading...
+curl -L -o "%TEMP%\OllamaSetup.exe" https://ollama.com/download/OllamaSetup.exe
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ ERROR: Could not download Ollama
+    echo Please download manually from: https://ollama.com/download
+    pause
+    exit /b 1
+)
+
+echo Installing Ollama...
+start /wait "" "%TEMP%\OllamaSetup.exe" /S
+timeout /t 10 /nobreak >nul
+
+where ollama >nul 2>&1
+if %ERRORLEVEL% EQU 0 (
+    echo ✓ Ollama installed successfully
+) else (
+    echo ⚠ Ollama may require manual setup
+    echo Visit: https://ollama.com/download
+)
+
+:ollama_ready
+
+REM ========================================================================
+REM STEP 2: Check/Install Python 3.10+
+REM ========================================================================
+
+echo.
+echo [2/5] Checking Python installation...
+echo ======================================================================
+
+REM Check for local Python310
+if exist "%PYTHON_DIR%\python.exe" (
+    set "PYTHON_EXE=%PYTHON_DIR%\python.exe"
+    echo ✓ Found local Python: %PYTHON_DIR%
+    goto :python_ready
+)
+
+REM Check for system Python 3.10+
+for %%P in (
+    "python"
+    "python3"
+    "py -3.10"
+    "py -3.11"
+    "py -3.12"
+) do (
+    %%P --version >nul 2>&1
+    if !ERRORLEVEL! EQU 0 (
+        for /f "tokens=2" %%V in ('%%P --version 2^>^&1') do (
+            set "VER=%%V"
+            echo Found: %%P version !VER!
+            REM Check if version is 3.10+
+            for /f "tokens=1,2 delims=." %%A in ("!VER!") do (
+                if %%A GEQ 3 if %%B GEQ 10 (
+                    set "PYTHON_EXE=%%P"
+                    echo ✓ Using system Python: %%P
+                    goto :python_ready
+                )
+            )
+        )
+    )
+)
+
+REM No suitable Python found, download portable Python
+echo ⚠ No Python 3.10+ found. Downloading portable Python...
+mkdir "%PYTHON_DIR%" 2>nul
+curl -L -o "%TEMP%\python-installer.exe" https://www.python.org/ftp/python/3.10.11/python-3.10.11-amd64.exe
+if %ERRORLEVEL% NEQ 0 (
+    echo ❌ ERROR: Could not download Python
+    echo Please install Python 3.10+ manually from: https://www.python.org/downloads/
+    pause
+    exit /b 1
+)
+
+echo Installing Python...
+"%TEMP%\python-installer.exe" /quiet InstallAllUsers=0 PrependPath=0 TargetDir="%PYTHON_DIR%"
+timeout /t 20 /nobreak >nul
+
+if exist "%PYTHON_DIR%\python.exe" (
+    set "PYTHON_EXE=%PYTHON_DIR%\python.exe"
+    echo ✓ Python installed to: %PYTHON_DIR%
+) else (
+    echo ❌ ERROR: Python installation failed
+    pause
+    exit /b 1
+)
+
+:python_ready
+"%PYTHON_EXE%" --version
+echo.
+
+REM ========================================================================
+REM STEP 3: Install Python Packages (Online via pip)
+REM ========================================================================
+
+echo.
+echo [3/5] Installing Python packages from PyPI...
+echo ======================================================================
+echo This may take 5-10 minutes...
+echo.
+
+"%PYTHON_EXE%" -m pip install --upgrade pip
+
+"%PYTHON_EXE%" -m pip install ^
+    torch ^
+    sentence-transformers ^
+    transformers ^
+    faiss-cpu ^
+    requests ^
+    pypdf ^
+    python-docx ^
+    openpyxl ^
+    xlrd ^
+    lxml ^
+    psutil ^
+    numpy ^
+    scikit-learn ^
+    Pillow
+
+if %ERRORLEVEL% EQU 0 (
+    echo ✓ All packages installed successfully
+) else (
+    echo ⚠ Some packages may have failed - check errors above
+)
+
+REM ========================================================================
+REM STEP 4: Download AI Models via Ollama
+REM ========================================================================
+
+echo.
+echo [4/5] Downloading AI models...
+echo ======================================================================
+
+REM Start Ollama server
+tasklist /FI "IMAGENAME eq ollama.exe" 2>NUL | find /I "ollama.exe" >NUL
+if "%ERRORLEVEL%"=="1" (
+    echo Starting Ollama server...
+    start /B ollama serve >nul 2>&1
+    timeout /t 5 /nobreak >nul
+)
+
+echo Pulling llama3.2:1b (fast, ~1.3 GB)...
+ollama pull llama3.2:1b
+if %ERRORLEVEL% EQU 0 (
+    echo ✓ llama3.2:1b downloaded
+) else (
+    echo ⚠ Failed to download llama3.2:1b
+)
+
+echo.
+echo Pulling llama3.2:3b (balanced, ~2.0 GB)...
+ollama pull llama3.2:3b
+if %ERRORLEVEL% EQU 0 (
+    echo ✓ llama3.2:3b downloaded
+) else (
+    echo ⚠ Failed to download llama3.2:3b
+)
+
+echo.
+echo Available models:
+ollama list
+
+REM ========================================================================
+REM STEP 5: Download Embedding Models
+REM ========================================================================
+
+echo.
+echo [5/5] Setting up embedding models...
+echo ======================================================================
+
+set "EMBED_DIR=%BASE%embedding_models"
+mkdir "%EMBED_DIR%" 2>nul
+
+echo Creating test script to download embeddings...
+>"%TEMP%\download_embeddings.py" (
+    echo from sentence_transformers import SentenceTransformer
+    echo import os
+    echo.
+    echo cache_dir = r'%EMBED_DIR%'
+    echo os.makedirs(cache_dir, exist_ok=True^)
+    echo.
+    echo print("Downloading all-MiniLM-L6-v2..."^)
+    echo model = SentenceTransformer('all-MiniLM-L6-v2', cache_folder=cache_dir^)
+    echo print("✓ Embedding model downloaded successfully"^)
+)
+
+"%PYTHON_EXE%" "%TEMP%\download_embeddings.py"
+if %ERRORLEVEL% EQU 0 (
+    echo ✓ Embedding models ready
+) else (
+    echo ⚠ Embedding model download may have failed
+    echo They will be downloaded on first run
+)
+
+REM ========================================================================
+REM Create Environment Config
+REM ========================================================================
+
+echo.
+echo Creating environment configuration...
+>"%BASE%set_env.bat" (
+    echo @echo off
+    echo set "PYTHON_HOME=%PYTHON_DIR%"
+    echo set "HF_HOME=%BASE%embedding_models"
+    echo set "TRANSFORMERS_CACHE=%BASE%embedding_models"
+    echo set "HF_DATASETS_CACHE=%BASE%embedding_models"
+    echo set "SENTENCE_TRANSFORMERS_HOME=%BASE%embedding_models"
+    echo set "TRANSFORMERS_OFFLINE=0"
+    echo set "HF_HUB_OFFLINE=0"
+)
+
+REM ========================================================================
+REM Installation Complete
+REM ========================================================================
+
+echo.
+echo ======================================================================
+echo ✅ INSTALLATION COMPLETE!
+echo ======================================================================
+echo.
+echo ✓ Ollama installed and running
+echo ✓ Python installed: %PYTHON_EXE%
+echo ✓ Python packages installed
+echo ✓ AI models downloaded (llama3.2:1b, llama3.2:3b)
+echo ✓ Embedding models ready
+echo.
+echo 🚀 To start the chatbot:
+echo    Double-click: launch_gui.bat
+echo.
+echo 📝 Note: Knowledge base needs to be created separately
+echo    Place your PDFs in knowledge_base\ folder
+echo.
+echo ======================================================================
+
+pause
+endlocal
